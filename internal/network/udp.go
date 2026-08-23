@@ -57,18 +57,20 @@ type UDPDiscovery struct {
 	stopCh   chan struct{}
 	done     chan struct{}
 	stateMu  sync.Mutex
-	started  bool
+	// listening 标记 readLoop 是否已启动。Close 仅在 listening 为 true 时等待 done，
+	// 避免在 Listen 从未成功（或部分失败）时永久阻塞。
+	listening bool
 	closed   bool
 }
 
 // NewUDPDiscovery 构造发现实例。
+// 构造时不预设 listening 状态，Close 仅在真正调用过 Listen 后才等待 readLoop 退出。
 func NewUDPDiscovery(port int, selfName string) *UDPDiscovery {
 	return &UDPDiscovery{
 		port:     port,
 		selfName: selfName,
 		stopCh:   make(chan struct{}),
 		done:     make(chan struct{}),
-		started:  true,
 	}
 }
 
@@ -100,7 +102,7 @@ func (u *UDPDiscovery) Listen() error {
 	conn.SetReadBuffer(64 * 1024)
 	u.conn = conn
 	u.stateMu.Lock()
-	u.started = true
+	u.listening = true
 	u.closed = false
 	u.stateMu.Unlock()
 	u.selfIP, _ = LocalIP()
@@ -229,18 +231,38 @@ func (u *UDPDiscovery) SendMessage(p MessagePacket) error {
 	return err
 }
 
+// LocalPort 返回已绑定监听的本地 UDP 端口；未监听时返回 0。
+// 用于测试或多实例场景获取实际端口。
+func (u *UDPDiscovery) LocalPort() int {
+	u.stateMu.Lock()
+	defer u.stateMu.Unlock()
+	if u.conn == nil {
+		return 0
+	}
+	if addr, ok := u.conn.LocalAddr().(*net.UDPAddr); ok {
+		return addr.Port
+	}
+	return 0
+}
+
 // Close 关闭监听。
+// 仅当 readLoop 真正启动过（listening=true）时等待其退出，避免在 Listen 失败或
+// 从未调用时无限阻塞在 <-u.done。Close 保证有限时间返回：readLoop 收到 stopCh
+// 后退出并 close(done)；若 readLoop 未启动则跳过等待。
 func (u *UDPDiscovery) Close() {
 	u.stopOnce.Do(func() {
 		u.stateMu.Lock()
 		u.closed = true
 		conn := u.conn
+		listening := u.listening
 		u.stateMu.Unlock()
 		close(u.stopCh)
 		if conn != nil {
 			_ = conn.Close()
 		}
-		<-u.done
+		if listening {
+			<-u.done
+		}
 	})
 }
 

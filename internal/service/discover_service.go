@@ -28,6 +28,9 @@ type DiscoverService struct {
 	done   chan struct{}
 	stopMu sync.Mutex
 	stopped bool
+	// running 标记 broadcastLoop 是否已启动。Stop 仅在 running 为 true 时等待 done，
+	// 避免在 Start 从未成功（或部分失败）时无限阻塞在 <-s.done。
+	running bool
 }
 
 // NewDiscoverService 构造发现服务。
@@ -44,6 +47,7 @@ func NewDiscoverService(cfg *config.Config, udp *network.UDPDiscovery, devRepo *
 }
 
 // Start 启动发现服务：开始监听 + 周期广播。
+// 失败时返回错误，资源由 Stop 兜底清理。调用方在 Start 返回错误后仍需调用 Stop。
 func (s *DiscoverService) Start(ctx context.Context) error {
 	// 注册 UDP 包回调
 	s.udp.OnPacket(s.handleDiscoveryPacket)
@@ -52,6 +56,9 @@ func (s *DiscoverService) Start(ctx context.Context) error {
 	if err := s.udp.Listen(); err != nil {
 		return fmt.Errorf("udp listen: %w", err)
 	}
+	s.stopMu.Lock()
+	s.running = true
+	s.stopMu.Unlock()
 	go s.broadcastLoop(ctx)
 	go s.staleLoop(ctx)
 	log.Printf("[discover] started, device=%s udp_port=%d", s.cfg.Device.Name, s.cfg.Network.UDPDiscoverPort)
@@ -59,6 +66,9 @@ func (s *DiscoverService) Start(ctx context.Context) error {
 }
 
 // Stop 停止发现服务。
+// 仅当 broadcastLoop 真正启动过（running=true）时等待 done，保证在 Start 失败、
+// 部分启动或正常运行三种生命周期下都能有限时间返回。Stop 内部先关 udp（触发
+// readLoop 退出）再关 stopCh（通知 broadcastLoop/staleLoop 退出），最后等 done。
 func (s *DiscoverService) Stop() {
 	s.stopMu.Lock()
 	if s.stopped {
@@ -66,10 +76,13 @@ func (s *DiscoverService) Stop() {
 		return
 	}
 	s.stopped = true
+	running := s.running
 	s.stopMu.Unlock()
 	s.udp.Close()
 	close(s.stopCh)
-	<-s.done
+	if running {
+		<-s.done
+	}
 	log.Println("[discover] stopped")
 }
 
