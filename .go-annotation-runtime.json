@@ -1,0 +1,16 @@
+{
+  "shape": "backend",
+  "service": {
+    "command": "GOCACHE=/tmp/lan-share-gocache LANSHARE_STORAGE_DATA_DIR=/tmp/lan-share-runtime-data LANSHARE_NETWORK_UDP_DISCOVER_PORT=28765 go run . -port 18776",
+    "startup_timeout_seconds": 30,
+    "health": {"url": "http://127.0.0.1:18776/api/v1/health", "method": "GET", "status": 200, "contains": "\"status\":\"up\""},
+    "api": {"url": "http://127.0.0.1:18776/api/v1/ping", "method": "GET", "status": 200, "contains": "pong"}
+  },
+  "workflow_checks": [
+    {"workflow_id": "discover-devices", "url": "http://127.0.0.1:18776/api/v1/devices", "method": "GET", "status": 200, "contains": "devices"},
+    {"workflow_id": "manage-shares", "url": "http://127.0.0.1:18776/api/v1/shares", "method": "GET", "status": 200, "contains": "shares"},
+    {"workflow_id": "browse-remote-share", "url": "http://127.0.0.1:18776/api/v1/remote/shares", "method": "GET", "status": 200, "contains": "shares"},
+    {"workflow_id": "track-transfers", "url": "http://127.0.0.1:18776/api/v1/transfers", "method": "GET", "status": 200, "contains": "transfers"},
+    {"workflow_id": "exchange-messages", "url": "http://127.0.0.1:18776/api/v1/messages", "method": "GET", "status": 200, "contains": "messages"}
+  ]
+}
