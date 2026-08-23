@@ -24,6 +24,7 @@ type DiscoverService struct {
 	cache   map[string]model.Device // ID -> 设备快照
 	msgRepo *repository.MessageRepository
 
+	wg     sync.WaitGroup // 跟踪回调 goroutine，确保 Stop 时不留下 in-flight 写入
 	stopCh chan struct{}
 	done   chan struct{}
 }
@@ -43,9 +44,22 @@ func NewDiscoverService(cfg *config.Config, udp *network.UDPDiscovery, devRepo *
 
 // Start 启动发现服务：开始监听 + 周期广播。
 func (s *DiscoverService) Start(ctx context.Context) error {
-	// 注册 UDP 包回调
-	s.udp.OnPacket(s.handleDiscoveryPacket)
-	s.udp.OnMessage(s.handleMessagePacket)
+	// 注册 UDP 包回调。包装一层，确保 wg.Add 在 goroutine 启动前完成，
+	// 避免 Stop() 调用 wg.Wait() 时与回调内部的 Add/Done 产生竞争。
+	s.udp.OnPacket(func(p network.DiscoverPacket) {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.handleDiscoveryPacket(p)
+		}()
+	})
+	s.udp.OnMessage(func(p network.MessagePacket) {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.handleMessagePacket(p)
+		}()
+	})
 
 	if err := s.udp.Listen(); err != nil {
 		return fmt.Errorf("udp listen: %w", err)
@@ -57,10 +71,13 @@ func (s *DiscoverService) Start(ctx context.Context) error {
 }
 
 // Stop 停止发现服务。
+// 先通知后台循环退出，再关闭 UDP 监听，最后等待所有 in-flight 回调 goroutine 结束，
+// 避免回调在 close 后继续读写 cache 导致并发 map 读写崩溃。
 func (s *DiscoverService) Stop() {
 	close(s.stopCh)
 	<-s.done
 	s.udp.Close()
+	s.wg.Wait()
 	log.Println("[discover] stopped")
 }
 
@@ -91,20 +108,46 @@ func (s *DiscoverService) SendMessage(ctx context.Context, toIP, content string)
 }
 
 // ListDevices 返回当前已知设备列表（内存缓存优先）。
+// 缓存为空时回源 DB 并回填缓存，避免在并发刷新期间返回不完整结果。
 func (s *DiscoverService) ListDevices(ctx context.Context) ([]model.Device, error) {
 	s.mu.RLock()
 	if len(s.cache) > 0 {
 		out := make([]model.Device, 0, len(s.cache))
+		now := time.Now()
 		for _, d := range s.cache {
-			d.CalcOnlineDuration(time.Now())
+			d.CalcOnlineDuration(now)
 			out = append(out, d)
 		}
 		s.mu.RUnlock()
 		return out, nil
 	}
 	s.mu.RUnlock()
-	// 缓存为空则回源
-	return s.devRepo.ListAll(ctx)
+
+	all, err := s.devRepo.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	next := make(map[string]model.Device, len(all))
+	now := time.Now()
+	for _, d := range all {
+		d.CalcOnlineDuration(now)
+		next[d.ID] = d
+	}
+
+	s.mu.Lock()
+	// 并发期间 handleDiscoveryPacket 可能已经写入新设备，保留这些条目。
+	for id, d := range s.cache {
+		if _, ok := next[id]; !ok {
+			next[id] = d
+		}
+	}
+	s.cache = next
+	out := make([]model.Device, 0, len(next))
+	for _, d := range next {
+		out = append(out, d)
+	}
+	s.mu.Unlock()
+	return out, nil
 }
 
 // GetDevice 查询单个设备。
@@ -118,8 +161,9 @@ func (s *DiscoverService) GetDevice(ctx context.Context, id string) (*model.Devi
 	s.mu.RUnlock()
 	return s.devRepo.Get(ctx, id)
 }
-
 // handleDiscoveryPacket 处理收到的 UDP 发现包。
+// 由 Start 注册的回调以独立 goroutine 派发，并通过 wg 跟踪生命周期，
+// 保证 Stop() 不会留下 in-flight 回调继续读写 cache。
 func (s *DiscoverService) handleDiscoveryPacket(pkt network.DiscoverPacket) {
 	if pkt.Name == s.cfg.Device.Name && pkt.IP == localIP() {
 		// 忽略自己
@@ -140,7 +184,9 @@ func (s *DiscoverService) handleDiscoveryPacket(pkt network.DiscoverPacket) {
 		return
 	}
 	dev.CalcOnlineDuration(time.Now())
+	s.mu.Lock()
 	s.cache[dev.ID] = dev
+	s.mu.Unlock()
 }
 
 // handleMessagePacket 处理收到的消息包。
@@ -224,6 +270,8 @@ func (s *DiscoverService) staleLoop(ctx context.Context) {
 }
 
 // refreshCache 从持久化层刷新内存缓存。
+// 持写锁替换缓存，避免与 handleDiscoveryPacket/ListDevices 并发读写 map。
+// 同时保留 cache 中尚未落到 DB 的条目，防止并发刷新期间丢失新发现的设备。
 func (s *DiscoverService) refreshCache(ctx context.Context) {
 	all, err := s.devRepo.ListAll(ctx)
 	if err != nil {
@@ -234,7 +282,15 @@ func (s *DiscoverService) refreshCache(ctx context.Context) {
 	for _, d := range all {
 		next[d.ID] = d
 	}
+	s.mu.Lock()
+	// 保留 refresh 期间刚被 handleDiscoveryPacket 写入、但 DB 快照还没读到的条目。
+	for id, d := range s.cache {
+		if _, ok := next[id]; !ok {
+			next[id] = d
+		}
+	}
 	s.cache = next
+	s.mu.Unlock()
 }
 
 // buildSelfPacket 构造本机的发现广播包。

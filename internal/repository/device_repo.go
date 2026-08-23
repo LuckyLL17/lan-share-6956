@@ -76,13 +76,16 @@ func (r *DeviceRepository) Get(ctx context.Context, id string) (*model.Device, e
 
 // ListByStatus 按状态列出设备，按 last_seen 降序。
 func (r *DeviceRepository) ListByStatus(ctx context.Context, status model.DeviceStatus) ([]model.Device, error) {
-	q := `SELECT id, name, ip, port, status, first_seen, last_seen, os FROM devices`
-	args := []interface{}{}
-	if status != "" {
-		q += ` WHERE status=?`
-		args = append(args, string(status))
+	var (
+		q    string
+		args []interface{}
+	)
+	if status == "" {
+		q = `SELECT id, name, ip, port, status, first_seen, last_seen, os FROM devices ORDER BY last_seen DESC`
+	} else {
+		q = `SELECT id, name, ip, port, status, first_seen, last_seen, os FROM devices WHERE status=? ORDER BY last_seen DESC`
+		args = []interface{}{string(status)}
 	}
-	q += ` O` + `RDER BY last_seen DESC`
 	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
