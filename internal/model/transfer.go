@@ -111,7 +111,7 @@ func (t Transfer) CanPause() bool {
 
 // IsPausedState reports whether the persisted transfer state represents a pause.
 func (t Transfer) IsPausedState() bool {
-	return t.Status == TransferStatusFailed
+	return t.Status == TransferStatusPaused
 }
 
 // Validate 创建传输时的基本校验

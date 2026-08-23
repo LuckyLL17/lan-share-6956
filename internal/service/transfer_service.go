@@ -115,14 +115,17 @@ func (s *TransferService) Start(ctx context.Context, id int64) error {
 }
 
 // Pause 暂停任务。
+// 标记用户主动暂停并取消运行上下文，使 run() 收尾时保留 paused 状态而非记为 failed。
 func (s *TransferService) Pause(ctx context.Context, id int64) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if task, ok := s.tasks[id]; ok {
+		task.paused = true
+	}
 	if cf, ok := s.cancel[id]; ok {
 		cf()
 	}
-	_ = s.repo.SetStatus(ctx, id, model.TransferStatusPaused, "")
-	return nil
+	s.mu.Unlock()
+	return s.repo.SetStatus(ctx, id, model.TransferStatusPaused, "")
 }
 
 // Cancel 取消任务。
@@ -195,8 +198,18 @@ func (s *TransferService) run(ctx context.Context, t model.Transfer) {
 	}
 
 	if err != nil {
+		// 用户主动暂停：保留 paused 状态与已传输字节，不记录失败。
+		s.mu.Lock()
+		userPaused := s.tasks[t.ID] != nil && s.tasks[t.ID].paused
+		s.mu.Unlock()
+		if userPaused {
+			_ = s.repo.SetStatus(context.Background(), t.ID, model.TransferStatusPaused, "")
+			log.Printf("[transfer] #%d paused by user", t.ID)
+			return
+		}
+		// 并发场景：DB 已被 Pause/Cancel 改写则尊重之，不覆盖为 failed。
 		current, getErr := s.repo.Get(context.Background(), t.ID)
-		if getErr == nil && current != nil && current.IsPausedState() {
+		if getErr == nil && current != nil && (current.IsPausedState() || current.Status == model.TransferStatusCanceled) {
 			return
 		}
 		_ = s.repo.SetStatus(context.Background(), t.ID, model.TransferStatusFailed, err.Error())
