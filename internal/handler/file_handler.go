@@ -161,8 +161,8 @@ func (h *FileHandler) Upload(c *gin.Context) {
 
 	rel := c.PostForm("path")
 	rel = strings.TrimPrefix(rel, "/")
-	// 防穿越
-	full, ok := sh.ResolvePath(rel)
+	// 防穿越 + 符号链接逃逸：父目录必须已在共享根内
+	full, ok := h.shareSvc.ResolveUploadPath(sh, rel)
 	if !ok {
 		fail(c, http.StatusBadRequest, "INVALID_PATH", "invalid upload path")
 		return

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -46,10 +47,80 @@ func (s Share) IsWritable() bool {
 }
 
 // ResolvePath turns a share-relative path into a filesystem path.
+// The returned path is lexically inside the share root (no `..` escape and
+// proper prefix boundary). It does NOT resolve symlinks — callers that need
+// to serve or write at the resolved location must additionally call
+// SafePathOnDisk to verify the on-disk target is still contained.
 func (s Share) ResolvePath(rel string) (string, bool) {
 	root := filepath.Clean(s.Path)
-	full := filepath.Clean(filepath.Join(root, rel))
-	return full, strings.HasPrefix(full, root)
+	rel = filepath.ToSlash(rel)
+	// Strip leading slashes and drop `.`/`..` segments lexically.
+	parts := make([]string, 0, 4)
+	for _, p := range strings.Split(rel, "/") {
+		if p == "" || p == "." {
+			continue
+		}
+		if p == ".." {
+			return "", false
+		}
+		parts = append(parts, p)
+	}
+	joined := filepath.Join(root, filepath.Join(parts...))
+	full := filepath.Clean(joined)
+	if !isWithin(root, full) {
+		return "", false
+	}
+	return full, true
+}
+
+// isWithin reports whether `path` is `root` itself or strictly inside `root`.
+// Both arguments must already be filepath.Clean'd. The boundary check uses a
+// separator to avoid the classic `/tmp/share` prefix-matching `/tmp/shareabc`.
+func isWithin(root, path string) bool {
+	if root == path {
+		return true
+	}
+	if !strings.HasPrefix(path, root) {
+		return false
+	}
+	return len(path) > len(root) && (path[len(root)] == os.PathSeparator)
+}
+
+// SafePathOnDisk evaluates `path` on disk and returns the real, symlink-free
+// absolute path if and only if that real path is still inside the share root.
+// Use this after ResolvePath before serving/opening user-controlled paths,
+// since a symlink under the share could otherwise escape the root.
+//
+// If checkParent is true the parent directory is also resolved (used when the
+// target file may not yet exist, e.g. upload).
+func (s Share) SafePathOnDisk(path string, checkParent bool) (string, bool) {
+	root, err := filepath.EvalSymlinks(filepath.Clean(s.Path))
+	if err != nil {
+		return "", false
+	}
+	evaluated, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		if checkParent && os.IsNotExist(err) {
+			// Resolve parent and re-append the base name; the parent must
+			// already exist (it is the share dir or a subdirectory of it).
+			parent := filepath.Dir(path)
+			base := filepath.Base(path)
+			realParent, perr := filepath.EvalSymlinks(parent)
+			if perr != nil {
+				return "", false
+			}
+			realPath := filepath.Join(realParent, base)
+			if !isWithin(root, realPath) {
+				return "", false
+			}
+			return realPath, true
+		}
+		return "", false
+	}
+	if !isWithin(root, evaluated) {
+		return "", false
+	}
+	return evaluated, true
 }
 
 // Validate 创建/更新共享时的基本校验

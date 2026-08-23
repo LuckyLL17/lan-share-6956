@@ -136,6 +136,8 @@ func (s *ShareService) List(ctx context.Context, onlyEnabled bool) ([]model.Shar
 
 // ListItems 浏览共享目录内容（相对路径）。
 // 返回的条目不暴露原始绝对路径。
+// 路径与符号链接均会校验：若目录本身是符号链接且指向共享根之外，
+// 或任何被列出的条目是逃逸符号链接，均会被拒绝。
 func (s *ShareService) ListItems(ctx context.Context, alias, rel string) ([]model.ShareItem, error) {
 	sh, err := s.repo.GetByAlias(ctx, alias)
 	if err != nil {
@@ -145,22 +147,42 @@ func (s *ShareService) ListItems(ctx context.Context, alias, rel string) ([]mode
 		return nil, model.ErrShareNotFound
 	}
 	rel = cleanRelPath(rel)
-	full := filepath.Join(sh.Path, rel)
-	info, err := os.Stat(full)
+	full, ok := sh.ResolvePath(rel)
+	if !ok {
+		return nil, errInvalidPath
+	}
+	// 校验目录真实路径仍在共享根内（防符号链接逃逸）
+	realFull, ok := sh.SafePathOnDisk(full, false)
+	if !ok {
+		return nil, errInvalidPath
+	}
+	info, err := os.Stat(realFull)
 	if err != nil {
 		return nil, fmt.Errorf("stat %s: %w", rel, err)
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("%s is not a directory", rel)
 	}
-	entries, err := os.ReadDir(full)
+	entries, err := os.ReadDir(realFull)
 	if err != nil {
 		return nil, fmt.Errorf("read dir: %w", err)
+	}
+	// 对每个被列出的条目校验符号链接：若指向共享根外，则跳过（不暴露未授权内容）。
+	realRoot, err := filepath.EvalSymlinks(filepath.Clean(sh.Path))
+	if err != nil {
+		return nil, errInvalidPath
 	}
 	items := make([]model.ShareItem, 0, len(entries))
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), ".") {
 			continue
+		}
+		entryPath := filepath.Join(realFull, e.Name())
+		if li, lerr := os.Lstat(entryPath); lerr == nil && li.Mode()&os.ModeSymlink != 0 {
+			realEntry, rerr := filepath.EvalSymlinks(entryPath)
+			if rerr != nil || !isWithinRoot(realRoot, realEntry) {
+				continue
+			}
 		}
 		fi, err := e.Info()
 		if err != nil {
@@ -183,8 +205,22 @@ func (s *ShareService) ListItems(ctx context.Context, alias, rel string) ([]mode
 	return items, nil
 }
 
+// isWithinRoot 报告 path 是否严格位于 root 内（含 root 自身）。
+// 入参均需 filepath.Clean 过。
+func isWithinRoot(root, path string) bool {
+	if root == path {
+		return true
+	}
+	if !strings.HasPrefix(path, root) {
+		return false
+	}
+	return len(path) > len(root) && (path[len(root)] == os.PathSeparator)
+}
+
 // ResolveFile 解析共享内某文件的绝对路径，用于下载/预览。
 // 同时返回共享对象以便权限判断。
+// 该方法同时校验磁盘符号链接：若解析后的真实路径逃逸出共享根，
+// 直接拒绝，避免通过符号链接访问未授权文件。
 func (s *ShareService) ResolveFile(ctx context.Context, alias, rel string) (*model.Share, string, error) {
 	sh, err := s.repo.GetByAlias(ctx, alias)
 	if err != nil {
@@ -196,10 +232,34 @@ func (s *ShareService) ResolveFile(ctx context.Context, alias, rel string) (*mod
 	rel = cleanRelPath(rel)
 	full, ok := sh.ResolvePath(rel)
 	if !ok {
-		return nil, "", fmt.Errorf("invalid path")
+		return nil, "", errInvalidPath
 	}
-	return sh, full, nil
+	// 校验符号链接：真实路径必须仍在共享根内
+	realFull, ok := sh.SafePathOnDisk(full, false)
+	if !ok {
+		return nil, "", errInvalidPath
+	}
+	return sh, realFull, nil
 }
+
+// ResolveUploadPath 解析上传目标绝对路径。
+// 与 ResolveFile 不同：上传目标可能尚未存在，因此对父目录做符号链接校验，
+// 再拼回文件名。最终路径必须仍在共享根内。
+func (s *ShareService) ResolveUploadPath(sh *model.Share, rel string) (string, bool) {
+	rel = cleanRelPath(rel)
+	full, ok := sh.ResolvePath(rel)
+	if !ok {
+		return "", false
+	}
+	realFull, ok := sh.SafePathOnDisk(full, true)
+	if !ok {
+		return "", false
+	}
+	return realFull, true
+}
+
+// errInvalidPath 表示请求的路径越界或通过符号链接逃逸出共享根。
+var errInvalidPath = errors.New("invalid path")
 
 // StatFile 取得共享内某文件信息。
 func (s *ShareService) StatFile(ctx context.Context, alias, rel string) (model.ShareItem, error) {
