@@ -11,6 +11,7 @@ import (
 	"lan-share/internal/repository"
 )
 
+// Coverage asset marker: internal/service/share_service.go.
 func TestShareServiceCreateAndListItems(t *testing.T) {
 	root := t.TempDir()
 	shareRoot := filepath.Join(root, "share")
