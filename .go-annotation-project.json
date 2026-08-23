@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "name": "lan-share",
+  "summary": "局域网设备发现、目录共享、文件传输和消息交换服务",
+  "user_roles": ["本机用户", "局域网访客设备", "后台发现循环"],
+  "entities": ["Device", "Share", "Transfer", "Message"],
+  "workflows": [
+    {
+      "id": "discover-devices",
+      "name": "设备发现与在线列表",
+      "actor": "本机用户和后台发现循环",
+      "entry": "POST /api/v1/devices/discover",
+      "steps": ["发送一次 UDP 发现公告", "接收公告并更新设备记录", "返回当前设备列表"],
+      "success": "发现接口成功返回，设备列表可读取",
+      "failure": "UDP 套接字失败或设备记录持久化失败",
+      "verification": "POST discover 后 GET devices 返回 JSON"
+    },
+    {
+      "id": "manage-shares",
+      "name": "共享目录生命周期",
+      "actor": "本机用户",
+      "entry": "POST /api/v1/shares",
+      "steps": ["提交目录路径和别名", "保存权限与启用状态", "列表接口返回共享"],
+      "success": "共享记录可查询且状态符合提交值",
+      "failure": "路径不存在、别名冲突或数据库写入失败",
+      "verification": "GET /api/v1/shares 返回共享列表"
+    },
+    {
+      "id": "browse-remote-share",
+      "name": "远端共享浏览",
+      "actor": "局域网访客设备",
+      "entry": "GET /api/v1/remote/shares",
+      "steps": ["读取启用共享清单", "按别名请求目录项", "拒绝越界路径"],
+      "success": "返回可访问的共享与目录项",
+      "failure": "别名不存在、共享停用或路径越界",
+      "verification": "GET remote shares 返回 JSON"
+    },
+    {
+      "id": "track-transfers",
+      "name": "文件传输状态跟踪",
+      "actor": "本机用户",
+      "entry": "GET /api/v1/transfers",
+      "steps": ["读取传输记录", "按状态过滤任务", "查询单任务进度"],
+      "success": "返回状态、字节数和错误信息",
+      "failure": "任务不存在或数据库查询失败",
+      "verification": "GET transfers 返回传输列表"
+    },
+    {
+      "id": "exchange-messages",
+      "name": "局域网消息交换",
+      "actor": "本机用户和局域网设备",
+      "entry": "GET /api/v1/messages",
+      "steps": ["创建消息记录", "通过 UDP 广播或单播", "查询未读数量并标记已读"],
+      "success": "消息列表和未读计数与本地状态一致",
+      "failure": "消息内容无效或网络发送失败",
+      "verification": "GET messages 与 unread 返回 JSON"
+    }
+  ],
+  "module_plan": [
+    {"package": "config", "workflow_ids": ["discover-devices", "manage-shares"]},
+    {"package": "internal/network", "workflow_ids": ["discover-devices", "exchange-messages"]},
+    {"package": "internal/repository", "workflow_ids": ["manage-shares", "track-transfers", "exchange-messages"]},
+    {"package": "internal/service", "workflow_ids": ["discover-devices", "manage-shares", "browse-remote-share", "track-transfers"]},
+    {"package": "internal/handler", "workflow_ids": ["discover-devices", "manage-shares", "browse-remote-share", "track-transfers", "exchange-messages"]}
+  ],
+  "interfaces": [
+    {"name": "health probe", "workflow_ids": ["discover-devices", "manage-shares", "browse-remote-share", "track-transfers", "exchange-messages"]},
+    {"name": "device API", "workflow_ids": ["discover-devices"]},
+    {"name": "share and remote API", "workflow_ids": ["manage-shares", "browse-remote-share"]},
+    {"name": "transfer API", "workflow_ids": ["track-transfers"]},
+    {"name": "message API", "workflow_ids": ["exchange-messages"]}
+  ]
+}
