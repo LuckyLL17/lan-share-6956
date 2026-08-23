@@ -21,12 +21,21 @@ type Message struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// IsBroadcast 是否为广播消息
+// broadcastAddr 是规范化后的广播哨兵地址。
+// network.normalizeMessageTarget 会把空 ToIP / "0.0.0.0" 统一映射为此值，
+// 因此这里以它作为“广播给所有设备”的唯一规范表示。
+const broadcastAddr = "255.255.255.255"
+
+// IsBroadcast 是否为广播消息（发给局域网内所有设备）。
+// ToIP 为空或为广播哨兵地址 255.255.255.255 时为真；
+// 任何具体单播地址都不是广播。
 func (m Message) IsBroadcast() bool {
-	return m.ToIP == "" || m.ToIP != "255.255.255.255"
+	return m.ToIP == "" || m.ToIP == broadcastAddr
 }
 
 // Targets reports whether a message should be handled by the local device.
+// 广播消息一律接收；单播消息仅当 ToIP 等于本机地址时接收，
+// 从而避免发往其他局域网地址的消息进入本地收件箱。
 func (m Message) Targets(localIP string) bool {
 	if m.IsBroadcast() {
 		return true
