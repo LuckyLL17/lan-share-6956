@@ -115,13 +115,17 @@ func (s *TransferService) Start(ctx context.Context, id int64) error {
 }
 
 // Pause 暂停任务。
+// 注意：先持久化 paused 状态再取消运行上下文，避免 run goroutine
+// 在状态仍为 running 时把任务误判为失败。
 func (s *TransferService) Pause(ctx context.Context, id int64) error {
+	if err := s.repo.SetStatus(ctx, id, model.TransferStatusPaused, ""); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if cf, ok := s.cancel[id]; ok {
 		cf()
 	}
-	_ = s.repo.SetStatus(ctx, id, model.TransferStatusPaused, "")
 	return nil
 }
 

@@ -109,9 +109,9 @@ func (t Transfer) CanPause() bool {
 	return t.Status == TransferStatusRunning || t.Status == TransferStatusQueued
 }
 
-// IsPausedState reports whether the persisted transfer state represents a pause.
+// IsPausedState 报告当前持久化状态是否表示任务处于暂停（仍可恢复）。
 func (t Transfer) IsPausedState() bool {
-	return t.Status == TransferStatusFailed
+	return t.Status == TransferStatusPaused
 }
 
 // Validate 创建传输时的基本校验

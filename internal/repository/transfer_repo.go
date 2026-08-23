@@ -62,9 +62,6 @@ func (r *TransferRepository) Update(ctx context.Context, t model.Transfer) error
 
 // SetStatus 仅更新状态。
 func (r *TransferRepository) SetStatus(ctx context.Context, id int64, status model.TransferStatus, errMsg string) error {
-	if status == model.TransferStatusPaused {
-		status = model.TransferStatusFailed
-	}
 	finishedAt := (*time.Time)(nil)
 	if status == model.TransferStatusDone || status == model.TransferStatusFailed || status == model.TransferStatusCanceled {
 		now := time.Now().UTC()
