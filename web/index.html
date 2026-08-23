@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>局域网文件共享</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --primary: #3b82f6;
+    --primary-hover: #2563eb;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --warn: #f59e0b;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header .title {
+    font-size: 18px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header .badge {
+    background: var(--success);
+    color: #052e16;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  header .me {
+    color: var(--muted);
+    font-size: 13px;
+  }
+  nav.tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 24px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  nav.tabs button {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    padding: 12px 18px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-size: 14px;
+  }
+  nav.tabs button.active {
+    color: var(--text);
+    border-bottom-color: var(--primary);
+  }
+  main {
+    padding: 20px 24px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .row > .card { flex: 1 1 320px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th, td {
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--muted); font-weight: 600; }
+  tr:hover td { background: var(--panel-2); }
+  .btn {
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .btn:hover { background: var(--primary-hover); }
+  .btn.sm { padding: 4px 10px; font-size: 12px; }
+  .btn.danger { background: var(--danger); }
+  .btn.warn { background: var(--warn); color: #1f1300; }
+  .btn.ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  input, select {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: var(--primary); }
+  .progress {
+    background: var(--panel-2);
+    border-radius: 999px;
+    height: 8px;
+    overflow: hidden;
+    width: 180px;
+  }
+  .progress > span {
+    display: block;
+    height: 100%;
+    background: var(--primary);
+    transition: width .3s;
+  }
+  .status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  .status.online { background: rgba(34,197,94,.15); color: #4ade80; }
+  .status.offline { background: rgba(239,68,68,.15); color: #f87171; }
+  .status.queued { background: rgba(148,163,184,.2); color: #cbd5e1; }
+  .status.running { background: rgba(59,130,246,.2); color: #60a5fa; }
+  .status.paused { background: rgba(245,158,11,.2); color: #fbbf24; }
+  .status.done { background: rgba(34,197,94,.2); color: #4ade80; }
+  .status.failed { background: rgba(239,68,68,.2); color: #f87171; }
+  .status.canceled { background: rgba(148,163,184,.2); color: #cbd5e1; }
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .toolbar h2 {
+    margin: 0;
+    font-size: 16px;
+  }
+  .breadcrumb {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .breadcrumb a {
+    color: var(--primary);
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .breadcrumb a:hover { text-decoration: underline; }
+  .breadcrumb span.sep { color: var(--muted); }
+  .file-icon {
+    display: inline-block;
+    width: 18px;
+    text-align: center;
+  }
+  .preview-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.8);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 24px;
+  }
+  .preview-modal.open { display: flex; }
+  .preview-modal .box {
+    background: var(--panel);
+    border-radius: var(--radius);
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow: auto;
+    padding: 16px;
+    position: relative;
+  }
+  .preview-modal img { max-width: 80vw; max-height: 75vh; }
+  .preview-modal video { max-width: 80vw; max-height: 75vh; }
+  .preview-modal pre {
+    background: var(--bg);
+    padding: 12px;
+    border-radius: 6px;
+    overflow: auto;
+    max-height: 70vh;
+    width: 70vw;
+  }
+  .close-btn {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 22px;
+    cursor: pointer;
+  }
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px 18px;
+    border-radius: 8px;
+    z-index: 200;
+    box-shadow: 0 6px 18px rgba(0,0,0,.4);
+    transform: translateY(20px);
+    opacity: 0;
+    transition: .25s;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .empty {
+    color: var(--muted);
+    padding: 24px;
+    text-align: center;
+  }
+  .badge-new {
+    background: var(--danger);
+    color: #fff;
+    border-radius: 999px;
+    font-size: 11px;
+    padding: 1px 7px;
+    margin-left: 6px;
+  }
+  .chat-list {
+    max-height: 400px;
+    overflow: auto;
+  }
+  .chat-item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    background: var(--panel-2);
+  }
+  .chat-item .from { color: var(--primary); font-weight: 600; }
+  .chat-item .time { color: var(--muted); font-size: 11px; float: right; }
+  .chat-item .content { margin-top: 4px; white-space: pre-wrap; }
+  .form-row { margin-bottom: 10px; }
+  .form-row label { display: block; margin-bottom: 4px; color: var(--muted); }
+  .form-row input, .form-row select { width: 100%; }
+</style>
+</head>
+<body>
+<header>
+  <div class="title">
+    <span>局域网文件共享</span>
+    <span class="badge" id="onlineBadge">未启动</span>
+  </div>
+  <div class="me" id="meInfo">-</div>
+</header>
+
+<nav class="tabs">
+  <button class="active" data-tab="devices">设备发现</button>
+  <button data-tab="shares">共享管理</button>
+  <button data-tab="browse">文件浏览</button>
+  <button data-tab="transfers">传输任务</button>
+  <button data-tab="messages">设备消息<span class="badge-new" id="msgBadge" style="display:none">新</span></button>
+  <button data-tab="settings">设置</button>
+</nav>
+
+<main>
+  <!-- 设备发现 -->
+  <section id="tab-devices" class="tab-panel">
+    <div class="toolbar">
+      <h2>在线设备</h2>
+      <div>
+        <button class="btn" id="btnDiscover">刷新设备</button>
+      </div>
+    </div>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>设备名</th><th>IP</th><th>端口</th><th>系统</th><th>状态</th><th>在线时长</th><th>操作</th></tr>
+        </thead>
+        <tbody id="devicesBody">
+          <tr><td colspan="7" class="empty">加载中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 共享管理 -->
+  <section id="tab-shares" class="tab-panel" style="display:none">
+    <div class="toolbar">
+      <h2>共享文件夹</h2>
+      <button class="btn" id="btnNewShare">新增共享</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>别名</th><th>路径</th><th>权限</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+        </thead>
+        <tbody id="sharesBody">
+          <tr><td colspan="6" class="empty">加载中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 文件浏览 -->
+  <section id="tab-browse" class="tab-panel" style="display:none">
+    <div class="toolbar">
+      <h2>本机共享文件</h2>
+      <div>
+        <select id="browseShareSelect" style="min-width:200px"></select>
+        <button class="btn sm" id="btnBrowseRefresh">刷新</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="breadcrumb" id="browseBreadcrumb"></div>
+      <table>
+        <thead>
+          <tr><th>名称</th><th>大小</th><th>修改时间</th><th>操作</th></tr>
+        </thead>
+        <tbody id="browseBody">
+          <tr><td colspan="4" class="empty">选择共享后浏览</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 传输任务 -->
+  <section id="tab-transfers" class="tab-panel" style="display:none">
+    <div class="toolbar">
+      <h2>传输任务</h2>
+      <div>
+        <button class="btn sm ghost" id="btnRefreshTransfers">刷新</button>
+        <button class="btn sm warn" id="btnClearHistory">清理历史</button>
+      </div>
+    </div>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>文件名</th><th>方向</th><th>对端</th><th>进度</th><th>状态</th><th>操作</th></tr>
+        </thead>
+        <tbody id="transfersBody">
+          <tr><td colspan="6" class="empty">暂无任务</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 设备消息 -->
+  <section id="tab-messages" class="tab-panel" style="display:none">
+    <div class="row">
+      <div class="card" style="flex:2 1 360px">
+        <div class="toolbar">
+          <h2>收到的消息</h2>
+          <button class="btn sm ghost" id="btnMarkAllRead">全部已读</button>
+        </div>
+        <div class="chat-list" id="msgList">
+          <div class="empty">暂无消息</div>
+        </div>
+      </div>
+      <div class="card" style="flex:1 1 280px">
+        <h2 style="margin-top:0">发送消息</h2>
+        <div class="form-row">
+          <label>目标设备（留空广播）</label>
+          <select id="msgTarget"><option value="">广播给所有人</option></select>
+        </div>
+        <div class="form-row">
+          <label>内容</label>
+          <textarea id="msgContent" rows="4" style="width:100%;background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px"></textarea>
+        </div>
+        <button class="btn" id="btnSendMsg">发送</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 设置 -->
+  <section id="tab-settings" class="tab-panel" style="display:none">
+    <div class="card">
+      <h2 style="margin-top:0">设备设置</h2>
+      <div class="form-row">
+        <label>设备名称</label>
+        <input id="setDeviceName" type="text" />
+      </div>
+      <div class="form-row">
+        <label>自动接收上传</label>
+        <select id="setAutoReceive">
+          <option value="true">开启</option>
+          <option value="false">关闭</option>
+        </select>
+      </div>
+      <button class="btn" id="btnSaveSettings">保存</button>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">系统信息</h2>
+      <table id="settingsTable"><tbody></tbody></table>
+    </div>
+  </section>
+</main>
+
+<!-- 预览弹窗 -->
+<div class="preview-modal" id="previewModal">
+  <div class="box">
+    <button class="close-btn" id="previewClose">×</button>
+    <div id="previewContent"></div>
+  </div>
+</div>
+
+<!-- 新增共享弹窗 -->
+<div class="preview-modal" id="shareModal">
+  <div class="box" style="width:420px;max-width:90vw">
+    <button class="close-btn" id="shareClose">×</button>
+    <h2 style="margin-top:0" id="shareModalTitle">新增共享</h2>
+    <div class="form-row">
+      <label>别名</label>
+      <input id="shareAlias" type="text" placeholder="如 my-photos" />
+    </div>
+    <div class="form-row">
+      <label>本地路径</label>
+      <input id="sharePath" type="text" placeholder="/Users/me/photos" />
+    </div>
+    <div class="form-row">
+      <label>权限</label>
+      <select id="sharePermission">
+        <option value="readonly">只读</option>
+        <option value="readwrite">可写</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>启用</label>
+      <select id="shareEnabled">
+        <option value="true">启用</option>
+        <option value="false">停用</option>
+      </select>
+    </div>
+    <button class="btn" id="btnSaveShare">保存</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = '/api/v1';
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+
+let editShareId = null;
+let browsePath = '';
+
+function toast(msg, ms = 2200) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._tm);
+  t._tm = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+async function apiGet(path) {
+  const r = await fetch(API + path);
+  return r.json();
+}
+async function apiJson(method, path, body) {
+  const r = await fetch(API + path, {
+    method,
+    headers: {'Content-Type':'application/json'},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return r.json();
+}
+
+function fmtSize(b) {
+  if (b == null) return '-';
+  if (b < 1024) return b + ' B';
+  const u = ['KB','MB','GB','TB'];
+  let i = -1; let v = b;
+  do { v /= 1024; i++; } while (v >= 1024 && i < u.length - 1);
+  return v.toFixed(2) + ' ' + u[i];
+}
+function fmtTime(s) {
+  if (!s) return '-';
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleString('zh-CN', {hour12:false});
+}
+function fmtDuration(sec) {
+  if (!sec || sec < 0) return '-';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `${d}天${h}小时`;
+  if (h > 0) return `${h}小时${m}分`;
+  return `${m}分`;
+}
+
+// 标签切换
+$$('.tabs button').forEach(btn => {
+  btn.onclick = () => {
+    $$('.tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    $$('.tab-panel').forEach(p => p.style.display = 'none');
+    $('#tab-' + btn.dataset.tab).style.display = '';
+    onTabShown(btn.dataset.tab);
+  };
+});
+
+function onTabShown(tab) {
+  if (tab === 'devices') loadDevices();
+  else if (tab === 'shares') loadShares();
+  else if (tab === 'browse') { loadBrowseShares(); }
+  else if (tab === 'transfers') loadTransfers();
+  else if (tab === 'messages') { loadMessages(); $('#msgBadge').style.display='none'; }
+  else if (tab === 'settings') loadSettings();
+}
+
+// ===== 设备 =====
+async function loadDevices() {
+  const body = $('#devicesBody');
+  body.innerHTML = '<tr><td colspan="7" class="empty">加载中...</td></tr>';
+  const res = await apiGet('/devices');
+  const list = (res.data && res.data.devices) || [];
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty">未发现设备，点刷新试试</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map(d => `
+    <tr>
+      <td>${escapeHtml(d.name)}</td>
+      <td>${escapeHtml(d.ip)}</td>
+      <td>${d.port}</td>
+      <td>${escapeHtml(d.os || '-')}</td>
+      <td><span class="status ${d.status}">${d.status}</span></td>
+      <td>${fmtDuration(d.online_seconds)}</td>
+      <td>
+        <button class="btn sm" onclick="browsePeer('${d.ip}', ${d.port})">浏览共享</button>
+      </td>
+    </tr>`).join('');
+  // 更新顶部状态
+  const online = list.filter(d => d.status === 'online').length;
+  $('#onlineBadge').textContent = `${online} 在线`;
+}
+
+async function loadMe() {
+  const res = await apiGet('/me');
+  if (res.data) {
+    $('#meInfo').textContent = `本机：${res.data.name || '-'} : ${res.data.port || ''}`;
+  }
+}
+
+$('#btnDiscover').onclick = async () => {
+  await apiJson('POST', '/devices/discover');
+  toast('已发起广播');
+  setTimeout(loadDevices, 800);
+};
+
+// ===== 共享 =====
+async function loadShares() {
+  const body = $('#sharesBody');
+  body.innerHTML = '<tr><td colspan="6" class="empty">加载中...</td></tr>';
+  const res = await apiGet('/shares');
+  const list = (res.data && res.data.shares) || [];
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">暂无共享，点“新增共享”</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map(s => `
+    <tr>
+      <td>${escapeHtml(s.alias)}</td>
+      <td>${escapeHtml(s.path)}</td>
+      <td>${s.permission === 'readwrite' ? '可写' : '只读'}</td>
+      <td><span class="status ${s.enabled ? 'online' : 'offline'}">${s.enabled ? '启用' : '停用'}</span></td>
+      <td>${fmtTime(s.created_at)}</td>
+      <td>
+        <button class="btn sm" onclick="editShare(${s.id})">编辑</button>
+        <button class="btn sm ghost" onclick="toggleShare(${s.id}, ${!s.enabled})">${s.enabled ? '停用' : '启用'}</button>
+        <button class="btn sm danger" onclick="delShare(${s.id})">删除</button>
+      </td>
+    </tr>`).join('');
+  // 同步填充浏览下拉
+  loadBrowseShares(list);
+}
+
+$('#btnNewShare').onclick = () => openShareModal(null);
+$('#shareClose').onclick = () => $('#shareModal').classList.remove('open');
+$('#btnSaveShare').onclick = async () => {
+  const body = {
+    alias: $('#shareAlias').value.trim(),
+    path: $('#sharePath').value.trim(),
+    permission: $('#sharePermission').value,
+    enabled: $('#shareEnabled').value === 'true',
+  };
+  if (!body.alias || !body.path) { toast('别名与路径必填'); return; }
+  let res;
+  if (editShareId) {
+    res = await apiJson('PUT', '/shares/' + editShareId, body);
+  } else {
+    res = await apiJson('POST', '/shares', body);
+  }
+  if (res.code === 0 || res.code === 201) {
+    toast('保存成功');
+    $('#shareModal').classList.remove('open');
+    loadShares();
+  } else {
+    toast(res.message || '保存失败');
+  }
+};
+
+function openShareModal(s) {
+  editShareId = s ? s.id : null;
+  $('#shareModalTitle').textContent = s ? '编辑共享' : '新增共享';
+  $('#shareAlias').value = s ? s.alias : '';
+  $('#sharePath').value = s ? s.path : '';
+  $('#sharePermission').value = s ? s.permission : 'readonly';
+  $('#shareEnabled').value = s ? String(s.enabled) : 'true';
+  $('#shareModal').classList.add('open');
+}
+window.editShare = async (id) => {
+  const res = await apiGet('/shares/' + id);
+  if (res.data) openShareModal(res.data);
+};
+window.toggleShare = async (id, enabled) => {
+  await apiJson('PATCH', `/shares/${id}/toggle`, {enabled});
+  loadShares();
+};
+window.delShare = async (id) => {
+  if (!confirm('确认删除此共享？仅删除记录，不删文件。')) return;
+  await apiJson('DELETE', '/shares/' + id);
+  loadShares();
+};
+
+// ===== 文件浏览 =====
+async function loadBrowseShares(preloadList) {
+  const sel = $('#browseShareSelect');
+  if (!preloadList) {
+    const res = await apiGet('/shares');
+    preloadList = (res.data && res.data.shares) || [];
+  }
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">选择共享...</option>' +
+    preloadList.filter(s => s.enabled).map(s => `<option value="${s.alias}">${s.alias} (${s.permission === 'readwrite' ? '可写' : '只读'})</option>`).join('');
+  if (cur) sel.value = cur;
+}
+$('#browseShareSelect').onchange = () => { browsePath = ''; loadBrowse(); };
+$('#btnBrowseRefresh').onclick = () => loadBrowse();
+
+async function loadBrowse() {
+  const alias = $('#browseShareSelect').value;
+  const body = $('#browseBody');
+  if (!alias) {
+    body.innerHTML = '<tr><td colspan="4" class="empty">选择共享后浏览</td></tr>';
+    $('#browseBreadcrumb').innerHTML = '';
+    return;
+  }
+  body.innerHTML = '<tr><td colspan="4" class="empty">加载中...</td></tr>';
+  const q = browsePath ? ('?path=' + encodeURIComponent(browsePath)) : '';
+  const res = await apiGet(`/shares/${encodeURIComponent(alias)}/items${q}`);
+  const items = (res.data && res.data.items) || [];
+  // 面包屑
+  const crumb = [`<a onclick="goBrowse('')">根目录</a>`];
+  if (browsePath) {
+    const parts = browsePath.split('/');
+    let acc = '';
+    parts.forEach((p, i) => {
+      acc = i === 0 ? p : acc + '/' + p;
+      const path = acc;
+      crumb.push('<span class="sep">/</span>');
+      crumb.push(`<a onclick="goBrowse('${escapeJs(path)}')">${escapeHtml(p)}</a>`);
+    });
+  }
+  $('#browseBreadcrumb').innerHTML = crumb.join('');
+  if (!items.length) {
+    body.innerHTML = '<tr><td colspan="4" class="empty">空目录</td></tr>';
+    return;
+  }
+  body.innerHTML = items.map(it => {
+    const rel = it.rel_path;
+    const icon = it.is_dir ? '📁' : '📄';
+    const url = `/files/${encodeURIComponent(alias)}/${rel}`;
+    const name = escapeHtml(it.name);
+    if (it.is_dir) {
+      return `<tr>
+        <td><span class="file-icon">${icon}</span><a onclick="goBrowse('${escapeJs(rel)}')">${name}</a></td>
+        <td>-</td>
+        <td>${fmtTime(it.mod_time)}</td>
+        <td></td>
+      </tr>`;
+    }
+    return `<tr>
+      <td><span class="file-icon">${icon}</span><a onclick="previewFile('${escapeJs(rel)}')">${name}</a></td>
+      <td>${fmtSize(it.size)}</td>
+      <td>${fmtTime(it.mod_time)}</td>
+      <td>
+        <button class="btn sm" onclick="downloadFile('${escapeJs(rel)}')">下载</button>
+        <button class="btn sm ghost" onclick="remoteTransfer('${escapeJs(rel)}', ${it.size})">下载到本机</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+window.goBrowse = (p) => { browsePath = p || ''; loadBrowse(); };
+window.downloadFile = (rel) => {
+  const alias = $('#browseShareSelect').value;
+  window.open(`/files/${encodeURIComponent(alias)}/${rel}?download=true`, '_blank');
+};
+window.previewFile = (rel) => {
+  const alias = $('#browseShareSelect').value;
+  const url = `/files/${encodeURIComponent(alias)}/${rel}`;
+  const ext = rel.split('.').pop().toLowerCase();
+  const c = $('#previewContent');
+  if (['jpg','jpeg','png','gif','webp','bmp','svg'].includes(ext)) {
+    c.innerHTML = `<img src="${url}" />`;
+  } else if (['mp4','webm','mov','mkv'].includes(ext)) {
+    c.innerHTML = `<video src="${url}" controls></video>`;
+  } else if (['mp3','wav','flac','ogg','m4a'].includes(ext)) {
+    c.innerHTML = `<audio src="${url}" controls></audio>`;
+  } else if (ext === 'pdf') {
+    c.innerHTML = `<iframe src="${url}" style="width:80vw;height:75vh;border:0"></iframe>`;
+  } else {
+    // 文本预览
+    fetch(url).then(r => r.text()).then(txt => {
+      c.innerHTML = `<pre>${escapeHtml(txt)}</pre>`;
+    }).catch(() => toast('预览失败'));
+  }
+  $('#previewModal').classList.add('open');
+};
+window.remoteTransfer = async (rel, size) => {
+  const alias = $('#browseShareSelect').value;
+  const res = await apiJson('POST', '/transfers', {
+    direction: 'download',
+    share_alias: alias,
+    remote_path: rel,
+    file_name: rel.split('/').pop(),
+    file_size: size,
+  });
+  if (res.code === 0 || res.data) {
+    toast('已加入下载队列');
+  } else {
+    toast(res.message || '创建失败');
+  }
+};
+$('#previewClose').onclick = () => $('#previewModal').classList.remove('open');
+
+// ===== 传输 =====
+let transferTimer = null;
+async function loadTransfers() {
+  const body = $('#transfersBody');
+  const res = await apiGet('/transfers?limit=100');
+  const list = (res.data && res.data.transfers) || [];
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">暂无任务</td></tr>';
+    return;
+  }
+  body.innerHTML = list.map(t => {
+    const pct = t.progress || 0;
+    const running = t.status === 'running' || t.status === 'queued';
+    return `<tr>
+      <td>${escapeHtml(t.file_name)}</td>
+      <td>${t.direction === 'upload' ? '↑上传' : '↓下载'}</td>
+      <td>${escapeHtml(t.peer_ip)}:${t.peer_port}</td>
+      <td>
+        <div class="progress"><span style="width:${pct.toFixed(1)}%"></span></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${fmtSize(t.bytes_transferred)} / ${fmtSize(t.file_size)} (${pct.toFixed(1)}%)</div>
+      </td>
+      <td><span class="status ${t.status}">${t.status}</span></td>
+      <td>
+        ${t.status === 'paused' || t.status === 'failed' || t.status === 'queued' ? `<button class="btn sm" onclick="startTransfer(${t.id})">继续</button>` : ''}
+        ${running ? `<button class="btn sm warn" onclick="pauseTransfer(${t.id})">暂停</button>` : ''}
+        ${!['done','failed','canceled'].includes(t.status) ? `<button class="btn sm danger" onclick="cancelTransfer(${t.id})">取消</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+  // 若有运行中任务，定时刷新
+  const hasRunning = list.some(t => t.status === 'running' || t.status === 'queued');
+  if (hasRunning && !transferTimer) {
+    transferTimer = setInterval(loadTransfers, 1500);
+  } else if (!hasRunning && transferTimer) {
+    clearInterval(transferTimer);
+    transferTimer = null;
+  }
+}
+window.startTransfer = (id) => apiJson('POST', '/transfers/' + id + '/start').then(loadTransfers);
+window.pauseTransfer = (id) => apiJson('POST', '/transfers/' + id + '/pause').then(loadTransfers);
+window.cancelTransfer = (id) => apiJson('DELETE', '/transfers/' + id).then(loadTransfers);
+$('#btnRefreshTransfers').onclick = loadTransfers;
+$('#btnClearHistory').onclick = async () => {
+  if (!confirm('确认清理所有已完成/失败/取消的记录？')) return;
+  await apiJson('DELETE', '/transfers/history');
+  loadTransfers();
+};
+
+// ===== 浏览对端共享 =====
+window.browsePeer = async (ip, port) => {
+  toast(`探测 ${ip}:${port} ...`);
+  // 切到浏览标签并提示
+  $$('.tabs button').forEach(b => b.classList.remove('active'));
+  document.querySelector('[data-tab="transfers"]').classList.add('active');
+  $$('.tab-panel').forEach(p => p.style.display = 'none');
+  $('#tab-transfers').style.display = '';
+  // 远端共享浏览简化：直接打开对端 URL
+  window.open(`http://${ip}:${port}/`, '_blank');
+};
+
+// ===== 消息 =====
+async function loadMessages() {
+  const res = await apiGet('/messages?limit=100');
+  const list = (res.data && res.data.messages) || [];
+  const el = $('#msgList');
+  if (!list.length) { el.innerHTML = '<div class="empty">暂无消息</div>'; return; }
+  el.innerHTML = list.map(m => `
+    <div class="chat-item">
+      <span class="from">${escapeHtml(m.from_name || m.from_ip)}</span>
+      <span class="time">${fmtTime(m.created_at)}</span>
+      <div class="content">${escapeHtml(m.content)}</div>
+    </div>`).join('');
+  // 同步目标设备下拉
+  const devRes = await apiGet('/devices');
+  const devs = (devRes.data && devRes.data.devices) || [];
+  $('#msgTarget').innerHTML = '<option value="">广播给所有人</option>' +
+    devs.filter(d => d.status === 'online').map(d => `<option value="${d.ip}">${d.name} (${d.ip})</option>`).join('');
+}
+$('#btnSendMsg').onclick = async () => {
+  const content = $('#msgContent').value.trim();
+  if (!content) return;
+  const toIP = $('#msgTarget').value;
+  await apiJson('POST', '/messages', {to_ip: toIP, content});
+  $('#msgContent').value = '';
+  toast('已发送');
+};
+$('#btnMarkAllRead').onclick = async () => {
+  await apiJson('POST', '/messages/read-all');
+  loadMessages();
+};
+
+async function pollUnread() {
+  try {
+    const res = await apiGet('/messages/unread');
+    const n = (res.data && res.data.unread) || 0;
+    $('#msgBadge').style.display = n > 0 ? '' : 'none';
+    $('#msgBadge').textContent = n > 99 ? '99+' : n;
+  } catch (e) {}
+}
+setInterval(pollUnread, 5000);
+
+// ===== 设置 =====
+async function loadSettings() {
+  const res = await apiGet('/settings');
+  if (!res.data) return;
+  $('#setDeviceName').value = res.data.device.name;
+  $('#setAutoReceive').value = String(res.data.device.auto_receive);
+  const tbl = $('#settingsTable tbody');
+  const rows = [
+    ['HTTP 监听', `${res.data.server.host}:${res.data.server.port}`],
+    ['单文件上限', res.data.server.max_upload_mb + ' MB'],
+    ['UDP 发现端口', res.data.network.udp_discover_port],
+    ['发现间隔', res.data.network.discover_interval + ' 秒'],
+    ['设备离线判定', res.data.network.device_ttl + ' 秒'],
+    ['数据目录', res.data.storage.data_dir],
+    ['默认共享目录', res.data.storage.share_dir],
+    ['默认下载目录', res.data.storage.download_dir],
+  ];
+  tbl.innerHTML = rows.map(r => `<tr><th style="width:160px">${r[0]}</th><td>${escapeHtml(String(r[1]))}</td></tr>`).join('');
+}
+$('#btnSaveSettings').onclick = async () => {
+  const body = {
+    device_name: $('#setDeviceName').value.trim(),
+    auto_receive: $('#setAutoReceive').value === 'true',
+  };
+  const res = await apiJson('PATCH', '/settings', body);
+  if (res.code === 0) {
+    toast('已保存（设备名下次启动后广播生效）');
+    loadMe();
+  } else toast(res.message || '保存失败');
+};
+
+// ===== 工具 =====
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function escapeJs(s) {
+  if (s == null) return '';
+  return String(s).replace(/'/g, "\\'").replace(/\\/g, '\\\\');
+}
+
+// 启动
+(async function init() {
+  await loadMe();
+  await loadDevices();
+  pollUnread();
+})();
+</script>
+</body>
+</html>
